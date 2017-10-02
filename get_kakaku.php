@@ -5,6 +5,7 @@
  *   'kakakuとか': {
  *     'price': '',
  *     'expired': '',
+ *     'updated_at': '',
  *   }
  * }
  */
@@ -19,81 +20,116 @@ $url = [
 /********************************************************/
 
 // まず前回の情報を取得
-$pre = json_decode(@file_get_contents(dirname(__FILE__) . '/pre'), true);
-//$updated_at = $pre['updated_at'];
-//$pre = $pre['price'];
+$pre_array = json_decode(@file_get_contents(dirname(__FILE__) . '/pre'), true);
+
+
+// 商品
+$item = [
+    'title' => 'α99M2',
+    'target' => [
+        // リストにしているのは重複商品があるかもだから。
+        [
+            'type' => 'kakaku',
+            'item_id' => 'K0000912430',
+        ],
+        [
+            'type' => 'amazon',
+            'item_id' => 'B01LX4PJTX',
+        ],
+    ],
+];
 
 
 // 最安の取得
-$now = [];
-$price = lowPriceKakaku($url['kakaku']);
-$now['kakaku_new']['price'] = $price;
-$now['kakaku_new']['expire'] = time() + 600;
-echo "kakaku new: " . number_format($price) . "\n";
-
-if ($pre['amazon_new']['expire'] < time()) {
-    $price = lowPriceAmazon($url['amazon'] . '?condition=new');
-    $expire = time() + ($price ? 60*30 : 60*60); // 取れなかったら1時間まつ
-    echo "amazon new: " . number_format($price) . "\n";
-} else {
-    $price = $pre['amazon_new']['price'];
-    $expire = $pre['amazon_new']['expire'];
-    echo "skip: amazon new: " . number_format($price) . "\n";
-}
-$now['amazon_new']['price'] = $price;
-$now['amazon_new']['expire'] = $expire;
-
-sleep(5);
-
-$price = lowPriceKakaku($url['kakaku'] . 'used/');
-$now['kakaku_old']['price'] = $price;
-$now['kakaku_old']['expire'] = time() + 600;
-echo "kakaku old: " . number_format($price) . "\n";
-
-if ($pre['amazon_old']['expire'] < time()) {
-    $price = lowPriceAmazon($url['amazon'] . '?condition=old');
-    $expire = time() + ($price ? 60*30 : 60*60); // 取れなかったら1時間まつ
-    echo "amazon old: " . number_format($price) . "\n";
-} else {
-    $price = $pre['amazon_old']['price'];
-    $expire = $pre['amazon_old']['expire'];
-    echo "skip: amazon old: " . number_format($price) . "\n";
-}
-$now['amazon_old']['price'] = $price;
-$now['amazon_old']['expire'] = $expire;
-
-file_put_contents(dirname(__FILE__) . '/pre', json_encode($now));
-
-// 比較して通知
-$diff = [
-    'kakaku_new' => $now['kakaku_new']['price'] - $pre['kakaku_new']['price'],
-    'amazon_new' => $now['amazon_new']['price'] - $pre['amazon_new']['price'],
-    'kakaku_old' => $now['kakaku_old']['price'] - $pre['kakaku_old']['price'],
-    'amazon_old' => $now['amazon_old']['price'] - $pre['amazon_old']['price'],
-];
-
-$is_notice = false;
-foreach ($diff as $val) {
-    if ($val != 0) { // 価格が変わったら
-//    if ($val < 0) { // 価格が下がったら
-        $is_notice = true;
-        break;
+foreach ($item['target'] as $target) {
+    $key = sha1(serialize($target));
+    $pre = $pre_array[$key] ?? [];
+    $now = $pre;
+    $url_new = null;
+    $url_old = null;
+    if ($target['type'] == 'kakaku') {
+        $url_new = sprintf('http://kakaku.com/item/%s/', $target['item_id']);
+        $url_old = sprintf('http://kakaku.com/item/%s/used/', $target['item_id']);
+        $expire_normal = 60*10;
+        $expire_error = 60*10;
+    } elseif ($target['type'] == 'amazon') {
+        $url_new = sprintf('https://www.amazon.co.jp/gp/offer-listing/%s?condition=new', $target['item_id']);
+        $url_old = sprintf('https://www.amazon.co.jp/gp/offer-listing/%s?condition=old', $target['item_id']);
+        $expire_normal = 60*60;
+        $expire_error = 60*60*2;
     }
+
+    // 新品
+    if (($pre['new']['expire'] ?? 0) < time()) {
+        $price = lowPrice($target['type'], $url_new);
+        if ($price) {
+            $now['new']['price'] = $price;
+            $now['new']['updated_at'] = time();
+            $expire = time() + $expire_normal;
+            echo "{$target['type']} new: " . number_format($price) . "\n";
+        } else {
+            $expire = time() + $expire_error; // 取れなかったら結構待つ
+        }
+        $now['new']['expire'] = $expire;
+    }
+
+    // 中古
+    if (($pre['old']['expire'] ?? 0) < time()) {
+        $price = lowPrice($target['type'], $url_old);
+        if ($price) {
+            $now['old']['price'] = $price;
+            $now['old']['updated_at'] = time();
+            $expire = time() + $expire_normal;
+            echo "{$target['type']} old: " . number_format($price) . "\n";
+        } else {
+            $expire = time() + $expire_error; // 取れなかったら結構待つ
+        }
+        $now['old']['expire'] = $expire;
+    }
+
+    $now_array[$key] = $now;
+
+    // 比較して通知
+    $diff = [
+        'new' => ($now['new']['price'] ?? 0) - ($pre['new']['price'] ?? 0),
+        'old' => ($now['old']['price'] ?? 0) - ($pre['old']['price'] ?? 0),
+    ];
+
+    $is_notice = false;
+    foreach ($diff as $val) {
+        if ($val != 0) { // 価格が変わったら
+//    if ($val < 0) { // 価格が下がったら
+            $is_notice = true;
+            break;
+        }
+    }
+
+    if ($is_notice) {
+        echo "$title 最安値更新！\n";
+        $text = "
+{$target['type']}(新品) " . formatDiff($pre['new']['price'], $now['new']['price']) . "
+{$target['type']}(中古) " . formatDiff($pre['old']['price'], $now['old']['price']) . "
+";
+        echo "$text\n";
+        mb_internal_encoding('UTF-8');
+        mb_send_mail('ishikawam@nifty.com', "$title 最安値更新！", $text);
+    }
+
 }
 
-if ($is_notice) {
-    echo "$title 最安値更新！\n";
-    $text = "
-価格.com(新品) " . formatDiff($pre['kakaku_new']['price'], $now['kakaku_new']['price']) . "
-アマゾン(新品) " . formatDiff($pre['amazon_new']['price'], $now['amazon_new']['price']) . "
-価格.com(中古) " . formatDiff($pre['kakaku_old']['price'], $now['kakaku_old']['price']) . "
-アマゾン(中古) " . formatDiff($pre['amazon_old']['price'], $now['amazon_old']['price']) . "
-";
-    mb_internal_encoding('UTF-8');
-    mb_send_mail('ishikawam@nifty.com', "$title 最安値更新！", $text);
-}
+file_put_contents(dirname(__FILE__) . '/pre', json_encode($now_array));
+
 
 /********************************************************/
+
+function lowPrice(string $type, string $url) {
+    if ($type == 'kakaku') {
+        return lowPriceKakaku($url);
+    } elseif ($type == 'amazon') {
+        return lowPriceAmazon($url);
+    }
+    return null;
+}
 
 function lowPriceKakaku(string $url) {
     $str = file_get_contents($url);
@@ -125,7 +161,7 @@ function formatDiff(int $pre = null, int $now = null) {
     $now = number_format($now);
     $pre = number_format($pre);
     if ($diff == 0) {
-        $text = "→ ±0 $now";
+        $text = "→ ±0 ($now)";
     } elseif ($diff > 0) {
         $text = "↑ +$diff ($pre -> $now)";
     } else {
