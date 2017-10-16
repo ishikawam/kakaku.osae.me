@@ -2,6 +2,13 @@
 
 return [
 
+    'CONSUMER_KEY' => env('CONSUMER_KEY'),
+    'CONSUMER_SECRET' => env('CONSUMER_SECRET'),
+    'OAUTH_CALLBACK' => env('OAUTH_CALLBACK'),
+
+
+/////////////////////////////////////////////
+
     /*
     |--------------------------------------------------------------------------
     | Application Name
