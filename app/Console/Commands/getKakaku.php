@@ -4,6 +4,8 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 
+use Abraham\TwitterOAuth\TwitterOAuth;
+
 class getKakaku extends Command
 {
     /**
@@ -126,6 +128,18 @@ class getKakaku extends Command
                     \Log::info($text);
                     mb_internal_encoding('UTF-8');
                     mb_send_mail('ishikawam@nifty.com', "{$item['title']} 最安値更新！", $text);
+
+                    // Twitter
+                    if ($item['twitter']) {
+                        $connection = new TwitterOAuth(
+                            config('app.CONSUMER_KEY'),
+                            config('app.CONSUMER_SECRET'),
+                            $item['twitter']['access_token'],
+                            $item['twitter']['access_token_secret']
+                        );
+                        $req = $connection->post('statuses/update', ['status' => $text]);
+                        var_dump($req);
+                    }
                 }
             }
         }
