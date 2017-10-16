@@ -1,0 +1,19 @@
+{
+    "1": {
+        "title": "α99M2",
+        "target": [
+            {
+                "type": "kakaku",
+                "item_id": "K0000912430"
+            },
+            {
+                "type": "amazon",
+                "item_id": "B01LX4PJTX"
+            }
+        ],
+        "twitter": {
+            "access_token": null,
+            "access_token_secret": null
+        }
+    }
+}
